@@ -455,24 +455,37 @@
                     <option value="borrowed">Borrowed</option>
                 </select>
             </div>
+            <div class="form-group">
+                <label>Cash Flow</label>
+                <select id="cashFlowType">
+                    <option value="cashIn">Cash In</option>
+                    <option value="cashOut">Cash Out</option>
+                </select>
+            </div>
             <button class="modal-button" onclick="addTransaction()">Add Transaction</button>
             <button class="modal-button" style="background: #DC2626;" onclick="closeModal('transactionModal')">Cancel</button>
         </div>
     </div>
 
-    <!-- Payment Modal -->
     <div id="paymentModal" class="modal">
-        <div class="modal-content">
-            <h2 style="margin-bottom: 20px;">Make Payment</h2>
-            <div class="form-group">
-                <label>Payment Amount</label>
-                <input type="number" id="paymentAmount" placeholder="Enter payment amount">
-            </div>
-            <input type="hidden" id="currentTransactionIndex">
-            <button class="modal-button" onclick="makePayment()">Submit Payment</button>
-            <button class="modal-button" style="background: #DC2626;" onclick="closeModal('paymentModal')">Cancel</button>
+    <div class="modal-content">
+        <h2 style="margin-bottom: 20px;">Make Payment</h2>
+        <div class="form-group">
+            <label>Payment Amount</label>
+            <input type="number" id="paymentAmount" placeholder="Enter payment amount">
         </div>
+        <div class="form-group">
+            <label>Payment Method</label>
+            <select id="paymentMethod">
+                <option value="cash">Directly on Cash</option>
+                <option value="ecash">E-Cash (Return to Balance)</option>
+            </select>
+        </div>
+        <input type="hidden" id="currentTransactionIndex">
+        <button class="modal-button" onclick="makePayment()">Submit Payment</button>
+        <button class="modal-button" style="background: #DC2626;" onclick="closeModal('paymentModal')">Cancel</button>
     </div>
+</div>
 
     <!-- Profile Modal -->
     <div id="profileModal" class="modal">
@@ -766,6 +779,7 @@
             const buyerName = document.getElementById('buyerName').value.trim();
             const amount = parseFloat(document.getElementById('amount').value);
             const type = document.getElementById('transactionType').value;
+            const cashFlowType = document.getElementById('cashFlowType').value;
 
             if (!buyerName) {
                 showNotification('Please enter a recipient name', 'error');
@@ -777,8 +791,8 @@
                 return;
             }
 
-            // Check if transaction amount exceeds current balance
-            if (amount > currentBalance) {
+            // For Cash In (deduct from balance), check if transaction amount exceeds current balance
+            if (cashFlowType === 'cashIn' && amount > currentBalance) {
                 showNotification(`Insufficient balance. Current balance: ${formatCurrency(currentBalance)}`, 'error');
                 return;
             }
@@ -788,12 +802,21 @@
                 amount,
                 date: new Date().toLocaleString(),
                 type,
+                cashFlowType, // Store the cash flow type
                 remainingAmount: type === 'borrowed' ? amount : 0
             };
 
             transactions.unshift(transaction);
-            // Subtract amount from balance
-            currentBalance = currentBalance - amount;
+            
+            // Update balance based on cash flow type
+            if (cashFlowType === 'cashIn') {
+                // Cash In: Subtract amount from balance
+                currentBalance = currentBalance - amount;
+            } else {
+                // Cash Out: Add amount to balance
+                currentBalance = currentBalance + amount;
+            }
+            
             updateBalanceDisplay();
             updateTransactionsList();
             closeModal('transactionModal');
@@ -801,76 +824,100 @@
             document.getElementById('buyerName').value = '';
             document.getElementById('amount').value = '';
             document.getElementById('transactionType').selectedIndex = 0;
+            document.getElementById('cashFlowType').selectedIndex = 0;
             
             showNotification('Transaction added successfully', 'success');
             saveData();
         }
 
         function showPaymentModal(transactionIndex) {
-            const transaction = transactions[transactionIndex];
-            document.getElementById('currentTransactionIndex').value = transactionIndex;
-            document.getElementById('paymentAmount').value = transaction.remainingAmount;
-            document.getElementById('paymentModal').style.display = 'flex';
-        }
+    const transaction = transactions[transactionIndex];
+    document.getElementById('currentTransactionIndex').value = transactionIndex;
+    document.getElementById('paymentAmount').value = transaction.remainingAmount;
+    document.getElementById('paymentMethod').selectedIndex = 0; // Reset to default option
+    document.getElementById('paymentModal').style.display = 'flex';
+}
 
         function makePayment() {
-            const transactionIndex = parseInt(document.getElementById('currentTransactionIndex').value);
-            const paymentAmount = parseFloat(document.getElementById('paymentAmount').value);
-            const transaction = transactions[transactionIndex];
+    const transactionIndex = parseInt(document.getElementById('currentTransactionIndex').value);
+    const paymentAmount = parseFloat(document.getElementById('paymentAmount').value);
+    const paymentMethod = document.getElementById('paymentMethod').value;
+    const transaction = transactions[transactionIndex];
 
-            if (isNaN(paymentAmount) || paymentAmount <= 0) {
-                showNotification('Please enter a valid payment amount', 'error');
-                return;
-            }
+    if (isNaN(paymentAmount) || paymentAmount <= 0) {
+        showNotification('Please enter a valid payment amount', 'error');
+        return;
+    }
 
-            if (paymentAmount > transaction.remainingAmount) {
-                showNotification('Payment amount cannot exceed remaining balance', 'error');
-                return;
-            }
+    if (paymentAmount > transaction.remainingAmount) {
+        showNotification('Payment amount cannot exceed remaining balance', 'error');
+        return;
+    }
 
-            // Update the transaction
-            transaction.remainingAmount -= paymentAmount;
-            
-            // If fully paid, update the type
-            if (transaction.remainingAmount === 0) {
-                transaction.type = 'paid';
-                transaction.fullyPaidDate = new Date().toLocaleString();
-            }
+    // Update the transaction
+    transaction.remainingAmount -= paymentAmount;
+    
+    // If payment method is E-Cash, return the amount to balance
+    if (paymentMethod === 'ecash') {
+        currentBalance += paymentAmount;
+        updateBalanceDisplay();
+    }
+    
+    // If fully paid, update the type
+    if (transaction.remainingAmount === 0) {
+        transaction.type = 'paid';
+        transaction.fullyPaidDate = new Date().toLocaleString();
+    }
 
-            // Add payment to the transaction's payment history if it doesn't exist
-            if (!transaction.payments) {
-                transaction.payments = [];
-            }
-            
-            transaction.payments.push({
-                amount: paymentAmount,
-                date: new Date().toLocaleString()
-            });
+    // Add payment to the transaction's payment history if it doesn't exist
+    if (!transaction.payments) {
+        transaction.payments = [];
+    }
+    
+    transaction.payments.push({
+        amount: paymentAmount,
+        date: new Date().toLocaleString(),
+        method: paymentMethod === 'cash' ? 'Directly on Cash' : 'E-Cash'
+    });
 
-            // Update UI and save
-            updateTransactionsList();
-            saveData();
-            closeModal('paymentModal');
-            showNotification('Payment recorded successfully', 'success');
-        }
+    // Update UI and save
+    updateTransactionsList();
+    saveData();
+    closeModal('paymentModal');
+    
+    const methodText = paymentMethod === 'cash' ? 'cash payment' : 'e-cash payment (balance updated)';
+    showNotification(`Payment recorded successfully via ${methodText}`, 'success');
+}
 
         function deleteTransaction(index) {
             // Ask for confirmation before deleting
             showConfirmation(
                 'Delete Transaction',
-                'Are you sure you want to delete this transaction? The amount will be returned to your balance.',
+                'Are you sure you want to delete this transaction? The amount will be returned/removed from your balance.',
                 () => {
                     const transaction = transactions[index];
                     
                     // If it's a borrowed transaction
                     if (transaction.type === 'borrowed' && transaction.remainingAmount > 0) {
-                        // Return only the remaining amount to the balance
-                        currentBalance += transaction.remainingAmount;
+                        // Return only the remaining amount to the balance or deduct from balance
+                        if (transaction.cashFlowType === 'cashIn') {
+                            // Cash In: Return the remaining amount
+                            currentBalance += transaction.remainingAmount;
+                        } else {
+                            // Cash Out: Deduct the remaining amount
+                            currentBalance -= transaction.remainingAmount;
+                        }
                     } 
                     // If it's a paid transaction or fully paid borrowed transaction
                     else {
-                        // Return the full amount to the balance
-                        currentBalance += transaction.amount;
+                        // Return the full amount to the balance or deduct from balance
+                        if (transaction.cashFlowType === 'cashIn') {
+                            // Cash In: Return the amount
+                            currentBalance += transaction.amount;
+                        } else {
+                            // Cash Out: Deduct the amount
+                            currentBalance -= transaction.amount;
+                        }
                     }
                     
                     // Remove the transaction from the array
@@ -887,60 +934,80 @@
         }
 
         function updateTransactionsList(filteredTransactions = transactions) {
-            const transactionsList = document.getElementById('transactionsList');
-            
-            if (filteredTransactions.length === 0) {
-                transactionsList.innerHTML = '<div style="text-align: center; color: #666;">No transactions yet</div>';
-                return;
-            }
+    const transactionsList = document.getElementById('transactionsList');
+    
+    if (filteredTransactions.length === 0) {
+        transactionsList.innerHTML = '<div style="text-align: center; color: #666;">No transactions yet</div>';
+        return;
+    }
 
-            transactionsList.innerHTML = filteredTransactions.map((transaction, index) => `
-                <div class="transaction-item">
-                    <div class="transaction-header">
-                        <div>${transaction.buyerName}</div>
-                        <div>
-                            <div class="transaction-amount negative">-${formatCurrency(transaction.amount)}</div>
+    transactionsList.innerHTML = filteredTransactions.map((transaction, index) => {
+        // Build payment history display
+        let paymentHistoryHTML = '';
+        if (transaction.payments && transaction.payments.length > 0) {
+            paymentHistoryHTML = `
+                <div style="margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 5px;">
+                    <div style="font-size: 12px; font-weight: bold; margin-bottom: 5px;">Payment History:</div>
+                    ${transaction.payments.map(payment => `
+                        <div style="font-size: 11px; color: #666; margin-bottom: 2px;">
+                            ${formatCurrency(payment.amount)} - ${payment.method} (${payment.date})
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        return `
+            <div class="transaction-item">
+                <div class="transaction-header">
+                    <div>${transaction.buyerName}</div>
+                    <div>
+                        <div class="transaction-amount ${transaction.cashFlowType === 'cashIn' ? 'negative' : ''}">
+                            ${transaction.cashFlowType === 'cashIn' ? '-' : '+'} ${formatCurrency(transaction.amount)}
                         </div>
                     </div>
-                    <div class="transaction-date">${transaction.date}</div>
-                    <div style="color: ${transaction.type === 'paid' ? '#059669' : '#DC2626'}">
-                        ${transaction.type === 'paid' ? 'Paid' : 'Borrowed'}
-                    </div>
-                    ${transaction.type === 'borrowed' && transaction.remainingAmount > 0 ? `
-                        <div style="margin-top: 10px;">
-                            <div>Remaining: ${formatCurrency(transaction.remainingAmount)}</div>
-                            <div style="display: flex; gap: 10px; margin-top: 5px;">
-                                <button 
-                                    class="modal-button" 
-                                    style="flex: 1; padding: 8px; font-size: 14px;"
-                                    onclick="showPaymentModal(${index})"
-                                >
-                                    Make Payment
-                                </button>
-                                <button 
-                                    class="modal-button" 
-                                    style="flex: 1; padding: 8px; background: #DC2626; font-size: 14px;"
-                                    onclick="deleteTransaction(${index})"
-                                >
-                                    Delete
-                                </button>
-                            </div>
-                        </div>
-                    ` : `
-                        <div style="margin-top: 10px;">
+                </div>
+                <div class="transaction-date">${transaction.date}</div>
+                <div style="color: ${transaction.type === 'paid' ? '#059669' : '#DC2626'}">
+                    ${transaction.type === 'paid' ? 'Paid' : 'Borrowed'} · 
+                    ${transaction.cashFlowType === 'cashIn' ? 'Cash In' : 'Cash Out'}
+                </div>
+                ${paymentHistoryHTML}
+                ${transaction.type === 'borrowed' && transaction.remainingAmount > 0 ? `
+                    <div style="margin-top: 10px;">
+                        <div>Remaining: ${formatCurrency(transaction.remainingAmount)}</div>
+                        <div style="display: flex; gap: 10px; margin-top: 5px;">
                             <button 
                                 class="modal-button" 
-                                style="width: 100%; padding: 8px; background: #DC2626; font-size: 14px;"
+                                style="flex: 1; padding: 8px; font-size: 14px;"
+                                onclick="showPaymentModal(${index})"
+                            >
+                                Make Payment
+                            </button>
+                            <button 
+                                class="modal-button" 
+                                style="flex: 1; padding: 8px; background: #DC2626; font-size: 14px;"
                                 onclick="deleteTransaction(${index})"
                             >
                                 Delete
                             </button>
                         </div>
-                    `}
-                </div>
-            `).join('');
-        }
-
+                    </div>
+                ` : `
+                    <div style="margin-top: 10px;">
+                        <button 
+                            class="modal-button" 
+                            style="width: 100%; padding: 8px; background: #DC2626; font-size: 14px;"
+                            onclick="deleteTransaction(${index})"
+                        >
+                            Delete
+                        </button>
+                    </div>
+                `}
+            </div>
+        `;
+    }).join('');
+}
         function showProfileModal() {
             document.getElementById('profileModal').style.display = 'flex';
             document.getElementById('profileName').value = userProfile.name;
