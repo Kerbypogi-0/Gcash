@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>File Transfer</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 0; background:#0e1116; color:#eaeef3 }
+    .container { max-width: 860px; margin: 0 auto; padding: 24px }
+    h1 { font-size: 24px; margin-bottom: 12px }
+    .dropzone { border:2px dashed #3a4353; border-radius:12px; padding:32px; text-align:center; background:#151a23 }
+    .dropzone.dragover { border-color:#6aa3ff; background:#111826 }
+    .controls { display:flex; gap:12px; align-items:center; margin-top:12px; flex-wrap: wrap }
+    input[type="number"] { width: 120px; padding:8px; border-radius:8px; border:1px solid #2a3240; background:#0f141b; color:#eaeef3 }
+    button { padding:10px 14px; border-radius:10px; border:none; background:#2f6fed; color:#fff; cursor:pointer }
+    button:disabled { opacity: .6; cursor: not-allowed }
+    .progress { height: 8px; background:#232a36; border-radius:6px; overflow:hidden; margin-top:12px }
+    .progress > div { height:100%; width:0%; background:#43d17d }
+    .result { margin-top:16px; background:#0f141b; border:1px solid #2a3240; padding:12px; border-radius:10px; word-break: break-all }
+    .file-list { margin-top:10px; font-size: 14px; color:#b6c1d2 }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>File Transfer</h1>
+    <div class="dropzone" id="dropzone">
+      <p>Drag and drop files here or click to choose</p>
+      <input id="fileInput" type="file" multiple style="display:none" />
+    </div>
+    <div class="controls">
+      <button id="chooseBtn">Choose Files</button>
+      <button id="uploadBtn" disabled>Upload</button>
+      <label>TTL (minutes) <input type="number" id="ttl" value="1440" min="1" /></label>
+      <label>Max downloads <input type="number" id="maxDownloads" value="0" min="0" /></label>
+    </div>
+    <div class="progress"><div id="bar"></div></div>
+    <div class="file-list" id="fileList"></div>
+    <div class="result" id="result" style="display:none"></div>
+  </div>
+  <script>
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const chooseBtn = document.getElementById('chooseBtn');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const fileList = document.getElementById('fileList');
+    const result = document.getElementById('result');
+    const bar = document.getElementById('bar');
+    const ttl = document.getElementById('ttl');
+    const maxDownloads = document.getElementById('maxDownloads');
+
+    let files = [];
+
+    function updateList() {
+      if (!files.length) {
+        fileList.textContent = '';
+        uploadBtn.disabled = true;
+        return;
+      }
+      uploadBtn.disabled = false;
+      fileList.innerHTML = files.map(f => `
+        <div>• ${f.name} (${(f.size/1024).toFixed(1)} KB)</div>
+      `).join('');
+    }
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    chooseBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => { files = Array.from(e.target.files); updateList(); });
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      files = Array.from(e.dataTransfer.files);
+      updateList();
+    });
+
+    uploadBtn.addEventListener('click', async () => {
+      if (!files.length) return;
+      const form = new FormData();
+      files.forEach(f => form.append('files', f));
+      form.append('ttlMinutes', ttl.value || '1440');
+      form.append('maxDownloads', maxDownloads.value || '0');
+
+      result.style.display = 'none';
+      bar.style.width = '0%';
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload');
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          bar.style.width = percent + '%';
+        }
+      };
+      xhr.onreadystatechange = () => {
+        if (xhr.readyState === 4) {
+          try {
+            const data = JSON.parse(xhr.responseText || '{}');
+            if (xhr.status >= 200 && xhr.status < 300) {
+              const batchUrl = data.shareUrl;
+              const token = data.files?.[0]?.token;
+              const fileLinks = (data.files || []).map(f => `<div><a href="/api/download/${f.id}?token=${encodeURIComponent(f.token)}">${f.originalName}</a></div>`).join('');
+              result.style.display = 'block';
+              result.innerHTML = `
+                <div><strong>Batch ZIP:</strong> <a href="${batchUrl}${token ? `?token=${encodeURIComponent(token)}` : ''}">${batchUrl}${token ? `?token=${encodeURIComponent(token)}` : ''}</a></div>
+                <div style="margin-top:8px"><strong>Individual files:</strong></div>
+                ${fileLinks}
+              `;
+            } else {
+              result.style.display = 'block';
+              result.textContent = data.error || 'Upload failed';
+            }
+          } catch (e) {
+            result.style.display = 'block';
+            result.textContent = 'Upload error';
+          }
+        }
+      };
+      xhr.send(form);
+    });
+  </script>
+  </body>
+  </html>
+
